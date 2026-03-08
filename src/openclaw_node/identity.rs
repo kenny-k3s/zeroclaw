@@ -1,9 +1,16 @@
 /// OpenClaw device identity — Ed25519 key generation and v3 auth signing
 use anyhow::{anyhow, Result};
+use ring::digest;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+
+/// Derive a stable device ID from the raw public key bytes.
+/// Matches OpenClaw's `deriveDeviceIdFromPublicKey`: SHA-256 of the raw key, hex-encoded.
+fn derive_device_id(public_key_bytes: &[u8]) -> String {
+    hex::encode(digest::digest(&digest::SHA256, public_key_bytes).as_ref())
+}
 
 /// Device identity with persisted Ed25519 keypair
 #[derive(Debug, Clone)]
@@ -46,8 +53,12 @@ impl DeviceIdentity {
         let public_key_bytes = base64_url::decode(&file.public_key)
             .map_err(|e| anyhow!("failed to decode public key: {}", e))?;
 
+        // Always re-derive the device ID from the public key (not from what's stored)
+        // This ensures correct IDs even if an old file stored a random UUID.
+        let device_id = derive_device_id(&public_key_bytes);
+
         Ok(DeviceIdentity {
-            device_id: file.device_id,
+            device_id,
             private_key_bytes,
             public_key_bytes,
         })
@@ -85,8 +96,12 @@ impl DeviceIdentity {
             .map_err(|_| anyhow!("failed to create Ed25519 key pair"))?;
         let public_key_bytes = key_pair.public_key().as_ref().to_vec();
 
+        // Device ID is SHA-256 of the raw public key bytes, hex-encoded.
+        // This matches OpenClaw's deriveDeviceIdFromPublicKey().
+        let device_id = derive_device_id(&public_key_bytes);
+
         Ok(DeviceIdentity {
-            device_id: uuid::Uuid::new_v4().to_string(),
+            device_id,
             private_key_bytes,
             public_key_bytes,
         })

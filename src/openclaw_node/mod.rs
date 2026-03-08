@@ -11,6 +11,8 @@ pub mod runner;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod live_tests;
 
 pub use runner::OpenClawNodeRunner;
 

@@ -1,6 +1,7 @@
 /// OpenClaw WebSocket client — manages connection, handshake, and message routing
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
@@ -12,6 +13,61 @@ use super::protocol::*;
 
 pub const CONNECT_TIMEOUT_SECS: u64 = 10;
 pub const HANDSHAKE_TIMEOUT_SECS: u64 = 5;
+
+// ─── no-cert verifier (dev/test only — accepts any TLS cert) ──────────────────
+
+#[derive(Debug)]
+struct NoCertVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme;
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::ECDSA_SHA1_Legacy,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ]
+    }
+}
 
 pub trait NodeMessageHandler: Send + Sync {
     /// Handle an invoke request from the gateway
@@ -40,6 +96,8 @@ pub struct OpenClawClient {
     gateway_token: Option<String>,
     device_token: Option<String>,
     last_tick_seq: Option<u64>,
+    /// Accept self-signed / invalid TLS certs — for dev/test environments only
+    accept_invalid_certs: bool,
 }
 
 impl OpenClawClient {
@@ -58,7 +116,15 @@ impl OpenClawClient {
             gateway_token,
             device_token: None,
             last_tick_seq: None,
+            accept_invalid_certs: false,
         }
+    }
+
+    /// Allow connecting to servers with self-signed / invalid TLS certificates.
+    /// For development and test environments only — do NOT use in production.
+    pub fn with_accept_invalid_certs(mut self) -> Self {
+        self.accept_invalid_certs = true;
+        self
     }
 
     /// Connect to gateway, perform handshake, and enter message loop
@@ -90,13 +156,37 @@ impl OpenClawClient {
         let _url = Url::parse(&self.gateway_url)
             .map_err(|e| anyhow!("invalid gateway URL: {}", e))?;
 
-        let (ws_stream, _) = timeout(
-            Duration::from_secs(CONNECT_TIMEOUT_SECS),
-            connect_async(&self.gateway_url),
-        )
-        .await
-        .map_err(|_| anyhow!("gateway connection timeout"))?
-        .map_err(|e| anyhow!("failed to connect to gateway: {}", e))?;
+        let ws_stream = if self.accept_invalid_certs {
+            // Build a custom TLS config that skips certificate verification
+            // (for dev/test environments with self-signed certs)
+            let tls_config = rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
+                .with_no_client_auth();
+            let connector = tokio_tungstenite::Connector::Rustls(Arc::new(tls_config));
+            let (stream, _) = timeout(
+                Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                tokio_tungstenite::connect_async_tls_with_config(
+                    &self.gateway_url,
+                    None,
+                    false,
+                    Some(connector),
+                ),
+            )
+            .await
+            .map_err(|_| anyhow!("gateway connection timeout"))?
+            .map_err(|e| anyhow!("failed to connect to gateway: {}", e))?;
+            stream
+        } else {
+            let (stream, _) = timeout(
+                Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                connect_async(&self.gateway_url),
+            )
+            .await
+            .map_err(|_| anyhow!("gateway connection timeout"))?
+            .map_err(|e| anyhow!("failed to connect to gateway: {}", e))?;
+            stream
+        };
 
         eprintln!("connected to gateway: {}", self.gateway_url);
 
@@ -115,7 +205,8 @@ impl OpenClawClient {
 
         // Perform handshake
         let hello_ok = client_state.handshake().await?;
-        self.device_token = Some(hello_ok.auth.device_token.clone());
+        // auth is optional (absent for unauthenticated/unpaired connections)
+        self.device_token = hello_ok.auth.as_ref().map(|a| a.device_token.clone());
         handler.on_connected();
 
         // Enter message loop

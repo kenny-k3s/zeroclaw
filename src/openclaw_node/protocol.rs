@@ -77,6 +77,19 @@ pub struct RequestFrame {
     pub params: Option<serde_json::Value>,
 }
 
+/// Error shape from gateway
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorShape {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(rename = "retryAfterMs", skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+}
+
 /// Server → Client response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseFrame {
@@ -85,7 +98,7 @@ pub struct ResponseFrame {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<::std::collections::HashMap<String, String>>,
+    pub error: Option<ErrorShape>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,8 +184,10 @@ pub struct HelloOk {
     pub server: ServerInfo,
     pub features: Features,
     pub snapshot: Snapshot,
-    pub canvas_host_url: String,
-    pub auth: AuthResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canvas_host_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthResponse>,
     pub policy: GatewayPolicy,
 }
 
@@ -192,13 +207,14 @@ pub struct Features {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     pub presence: Vec<serde_json::Value>,
-    pub health: HashMap<String, serde_json::Value>,
+    /// HealthSnapshotSchema = Type.Any() — can be any JSON value
+    pub health: serde_json::Value,
     #[serde(rename = "stateVersion")]
     pub state_version: StateVersion,
     #[serde(rename = "uptimeMs")]
     pub uptime_ms: u64,
-    #[serde(rename = "authMode")]
-    pub auth_mode: String,
+    #[serde(rename = "authMode", skip_serializing_if = "Option::is_none")]
+    pub auth_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,8 +223,8 @@ pub struct AuthResponse {
     pub device_token: String,
     pub role: String,
     pub scopes: Vec<String>,
-    #[serde(rename = "issuedAtMs")]
-    pub issued_at_ms: u64,
+    #[serde(rename = "issuedAtMs", skip_serializing_if = "Option::is_none")]
+    pub issued_at_ms: Option<u64>,
 }
 
 /// Node pairing request
