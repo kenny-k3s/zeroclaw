@@ -94,7 +94,6 @@ pub struct OpenClawClient {
     display_name: String,
     device_identity: DeviceIdentity,
     gateway_token: Option<String>,
-    device_token: Option<String>,
     last_tick_seq: Option<u64>,
     /// Accept self-signed / invalid TLS certs — for dev/test environments only
     accept_invalid_certs: bool,
@@ -114,7 +113,6 @@ impl OpenClawClient {
             display_name: display_name.into(),
             device_identity,
             gateway_token,
-            device_token: None,
             last_tick_seq: None,
             accept_invalid_certs: false,
         }
@@ -195,7 +193,6 @@ impl OpenClawClient {
             node_id: self.node_id.clone(),
             device_identity: self.device_identity.clone(),
             gateway_token: self.gateway_token.clone(),
-            device_token: self.device_token.clone(),
             display_name: self.display_name.clone(),
             next_request_id: 1,
             last_tick_ts: None,
@@ -205,8 +202,8 @@ impl OpenClawClient {
 
         // Perform handshake
         let hello_ok = client_state.handshake().await?;
-        // auth is optional (absent for unauthenticated/unpaired connections)
-        self.device_token = hello_ok.auth.as_ref().map(|a| a.device_token.clone());
+        // device_token from HelloOk.auth is intentionally not stored — the gateway
+        // rejects it if sent back in subsequent connect requests (auth is via Ed25519 challenge).
         handler.on_connected();
 
         // Enter message loop
@@ -221,7 +218,6 @@ struct ClientState {
     node_id: String,
     device_identity: DeviceIdentity,
     gateway_token: Option<String>,
-    device_token: Option<String>,
     display_name: String,
     next_request_id: u64,
     last_tick_ts: Option<u64>,
@@ -299,7 +295,6 @@ impl ClientState {
                 },
                 auth: AuthCredentials {
                     token: self.gateway_token.clone(),
-                    device_token: self.device_token.clone(),
                     password: None,
                 },
                 permissions: None,
