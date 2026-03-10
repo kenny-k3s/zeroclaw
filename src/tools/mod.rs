@@ -304,7 +304,8 @@ pub fn all_tools_with_runtime(
             (!trimmed_value.is_empty()).then(|| trimmed_value.to_owned())
         });
         let parent_tools = Arc::new(tool_arcs.clone());
-        let delegate_tool = DelegateTool::new_with_options(
+
+        let mut delegate_tool = DelegateTool::new_with_options(
             delegate_agents,
             delegate_fallback_credential,
             security.clone(),
@@ -320,6 +321,16 @@ pub fn all_tools_with_runtime(
         )
         .with_parent_tools(parent_tools)
         .with_multimodal_config(root_config.multimodal.clone());
+
+        if root_config.cluster.enabled {
+            let mut peers = HashMap::new();
+            for peer in &root_config.cluster.peers {
+                peers.insert(peer.clone(), peer.clone());
+            }
+            let node_id = crate::cluster::NodeId::new();
+            delegate_tool = delegate_tool.with_cluster(peers, node_id);
+        }
+
         tool_arcs.push(Arc::new(delegate_tool));
     }
 
@@ -554,6 +565,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
 

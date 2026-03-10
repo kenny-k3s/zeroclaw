@@ -10,6 +10,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::timeout;
 
 /// Default timeout for sub-agent provider calls.
 const DELEGATE_TIMEOUT_SECS: u64 = 120;
@@ -33,6 +34,9 @@ pub struct DelegateTool {
     parent_tools: Arc<Vec<Arc<dyn Tool>>>,
     /// Inherited multimodal handling config for sub-agent loops.
     multimodal_config: crate::config::MultimodalConfig,
+    /// Cluster configuration for cross-node delegation
+    cluster_peers: Arc<HashMap<String, String>>,
+    cluster_node_id: Option<crate::cluster::NodeId>,
 }
 
 impl DelegateTool {
@@ -63,6 +67,8 @@ impl DelegateTool {
             depth: 0,
             parent_tools: Arc::new(Vec::new()),
             multimodal_config: crate::config::MultimodalConfig::default(),
+            cluster_peers: Arc::new(HashMap::new()),
+            cluster_node_id: None,
         }
     }
 
@@ -99,6 +105,8 @@ impl DelegateTool {
             depth,
             parent_tools: Arc::new(Vec::new()),
             multimodal_config: crate::config::MultimodalConfig::default(),
+            cluster_peers: Arc::new(HashMap::new()),
+            cluster_node_id: None,
         }
     }
 
@@ -111,6 +119,17 @@ impl DelegateTool {
     /// Attach multimodal configuration for sub-agent tool loops.
     pub fn with_multimodal_config(mut self, config: crate::config::MultimodalConfig) -> Self {
         self.multimodal_config = config;
+        self
+    }
+
+    /// Attach cluster configuration for cross-node delegation.
+    pub fn with_cluster(
+        mut self,
+        peers: HashMap<String, String>,
+        node_id: crate::cluster::NodeId,
+    ) -> Self {
+        self.cluster_peers = Arc::new(peers);
+        self.cluster_node_id = Some(node_id);
         self
     }
 }
@@ -153,6 +172,10 @@ impl Tool for DelegateTool {
                 "context": {
                     "type": "string",
                     "description": "Optional context to prepend (e.g. relevant code, prior findings)"
+                },
+                "node": {
+                    "type": "string",
+                    "description": "Optional node name to delegate to (for cross-node delegation in cluster mode). If not specified, delegation happens locally."
                 }
             },
             "required": ["agent", "prompt"]
@@ -193,6 +216,45 @@ impl Tool for DelegateTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .unwrap_or("");
+
+        let node_name = args
+            .get("node")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        if let Some(target_node) = node_name {
+            if self.cluster_peers.is_empty() {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Cross-node delegation to node '{}' requires cluster mode. Configure [cluster] in config.toml to enable.",
+                        target_node
+                    )),
+                });
+            }
+
+            let peer_addr = self.cluster_peers.get(target_node).cloned();
+            if let Some(addr) = peer_addr {
+                return self
+                    .execute_cross_node(agent_name, prompt, context, target_node, &addr)
+                    .await;
+            }
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!(
+                    "Unknown node '{}'. Available cluster nodes: {}",
+                    target_node,
+                    self.cluster_peers
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            });
+        }
 
         // Look up agent config
         let agent_config = match self.agents.get(agent_name) {
@@ -334,6 +396,90 @@ impl Tool for DelegateTool {
                 success: false,
                 output: String::new(),
                 error: Some(format!("Agent '{agent_name}' failed: {e}",)),
+            }),
+        }
+    }
+}
+
+impl DelegateTool {
+    async fn execute_cross_node(
+        &self,
+        agent_name: &str,
+        prompt: &str,
+        context: &str,
+        target_node: &str,
+        peer_addr: &str,
+    ) -> anyhow::Result<ToolResult> {
+        use futures_util::{SinkExt, StreamExt};
+
+        let source_id = self.cluster_node_id.unwrap_or_default();
+
+        let delegate_msg = crate::cluster::ClusterMessage::delegate_cross_node(
+            agent_name.to_string(),
+            prompt.to_string(),
+            if context.is_empty() {
+                None
+            } else {
+                Some(context.to_string())
+            },
+            source_id,
+            None,
+        );
+
+        let url = format!("ws://{}/ws/cluster", peer_addr);
+        tracing::info!("Connecting to cluster node at {}", url);
+
+        let (ws, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to node {}: {}", target_node, e))?;
+
+        let (mut sender, mut receiver) = ws.split();
+
+        sender
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                delegate_msg.encode().into(),
+            ))
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send delegation request: {}", e))?;
+
+        let response = timeout(Duration::from_secs(DELEGATE_TIMEOUT_SECS), async {
+            while let Some(msg) = receiver.next().await {
+                if let Ok(tokio_tungstenite::tungstenite::Message::Text(text)) = msg {
+                    if let Some(cluster_msg) = crate::cluster::ClusterMessage::decode(&text) {
+                        if let crate::cluster::ClusterMessage::DelegateResponse {
+                            id: _,
+                            result,
+                            source: _,
+                            error,
+                        } = cluster_msg
+                        {
+                            return Ok((result, error));
+                        }
+                    }
+                }
+            }
+            Err(anyhow::anyhow!(
+                "Connection closed before receiving response"
+            ))
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Cross-node delegation timed out after {}s",
+                DELEGATE_TIMEOUT_SECS
+            )
+        })??;
+
+        match response {
+            (result, None) => Ok(ToolResult {
+                success: true,
+                output: format!("[Agent '{agent_name}' @ node {target_node}]\n{result}"),
+                error: None,
+            }),
+            (_, Some(error)) => Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Node {} error: {}", target_node, error)),
             }),
         }
     }
@@ -519,6 +665,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
         agents.insert(
@@ -533,6 +680,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
         agents
@@ -686,6 +834,7 @@ mod tests {
             agentic: true,
             allowed_tools,
             max_iterations,
+            node: None,
         }
     }
 
@@ -794,6 +943,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
         let tool = DelegateTool::new(agents, None, test_security());
@@ -900,6 +1050,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
         let tool = DelegateTool::new(agents, None, test_security());
@@ -935,6 +1086,7 @@ mod tests {
                 agentic: false,
                 allowed_tools: Vec::new(),
                 max_iterations: 10,
+                node: None,
             },
         );
         let tool = DelegateTool::new(agents, None, test_security());

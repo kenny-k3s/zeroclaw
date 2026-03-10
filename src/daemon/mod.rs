@@ -71,6 +71,21 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         ));
     }
 
+    if config.cluster.enabled {
+        let cluster_cfg = config.clone();
+        handles.push(spawn_component_supervisor(
+            "cluster",
+            initial_backoff,
+            max_backoff,
+            move || {
+                let cfg = cluster_cfg.clone();
+                async move { crate::cluster::run_cluster(&cfg.cluster).await }
+            },
+        ));
+    } else {
+        crate::health::mark_component_ok("cluster");
+    }
+
     if config.cron.enabled {
         let scheduler_cfg = config.clone();
         handles.push(spawn_component_supervisor(
@@ -87,9 +102,18 @@ pub async fn run(config: Config, host: String, port: u16) -> Result<()> {
         tracing::info!("Cron disabled; scheduler supervisor not started");
     }
 
+    let components = if config.cluster.enabled {
+        "gateway, channels, heartbeat, cluster, scheduler"
+    } else {
+        "gateway, channels, heartbeat, scheduler"
+    };
+
     println!("🧠 ZeroClaw daemon started");
     println!("   Gateway:  http://{host}:{port}");
-    println!("   Components: gateway, channels, heartbeat, scheduler");
+    if config.cluster.enabled {
+        println!("   Cluster:  ws://{}:{}", host, config.cluster.bind_port);
+    }
+    println!("   Components: {}", components);
     println!("   Ctrl+C to stop");
 
     tokio::signal::ctrl_c().await?;

@@ -93,11 +93,12 @@ impl PromptGuard {
         total_score += self.check_command_injection(content, &mut detected_patterns);
         total_score += self.check_jailbreak_attempts(content, &mut detected_patterns);
 
-        // Normalize score to 0.0-1.0 range (max possible is 6.0, one per category)
-        let normalized_score = (total_score / 6.0).min(1.0);
+        // Normalize score to 0.0-1.0 range.
+        // Each category returns a 0.0-1.0 severity score; summing is capped to 1.0.
+        let normalized_score = total_score.min(1.0);
 
         if !detected_patterns.is_empty() {
-            if normalized_score >= self.sensitivity {
+            if normalized_score > self.sensitivity {
                 match self.action {
                     GuardAction::Block => GuardResult::Blocked(format!(
                         "Potential prompt injection detected (score: {:.2}): {}",
@@ -119,7 +120,10 @@ impl PromptGuard {
         static SYSTEM_OVERRIDE_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
         let regexes = SYSTEM_OVERRIDE_PATTERNS.get_or_init(|| {
             vec![
-                Regex::new(r"(?i)ignore\s+(previous|all|above|prior)\s+(instructions?|prompts?|commands?)").unwrap(),
+                Regex::new(
+                    r"(?i)ignore\s+(?:all\s+)?(?:previous|above|prior)?\s*(instructions?|prompts?|commands?|context)",
+                )
+                .unwrap(),
                 Regex::new(r"(?i)disregard\s+(previous|all|above|prior)").unwrap(),
                 Regex::new(r"(?i)forget\s+(previous|all|everything|above)").unwrap(),
                 Regex::new(r"(?i)new\s+(instructions?|rules?|system\s+prompt)").unwrap(),
@@ -142,10 +146,14 @@ impl PromptGuard {
         static ROLE_CONFUSION_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
         let regexes = ROLE_CONFUSION_PATTERNS.get_or_init(|| {
             vec![
-                Regex::new(r"(?i)(you\s+are\s+now|act\s+as|pretend\s+(you're|to\s+be))\s+(a|an|the)?").unwrap(),
+                Regex::new(
+                    r"(?i)(you\s+are\s+now|act\s+as|pretend\s+(you're|to\s+be))\s+(a|an|the)?",
+                )
+                .unwrap(),
                 Regex::new(r"(?i)(your\s+new\s+role|you\s+have\s+become|you\s+must\s+be)").unwrap(),
                 Regex::new(r"(?i)from\s+now\s+on\s+(you\s+are|act\s+as|pretend)").unwrap(),
-                Regex::new(r"(?i)(assistant|AI|system|model):\s*\[?(system|override|new\s+role)").unwrap(),
+                Regex::new(r"(?i)(assistant|AI|system|model):\s*\[?(system|override|new\s+role)")
+                    .unwrap(),
             ]
         });
 
@@ -183,7 +191,7 @@ impl PromptGuard {
         static SECRET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
         let regexes = SECRET_PATTERNS.get_or_init(|| {
             vec![
-                Regex::new(r"(?i)(list|show|print|display|reveal|tell\s+me)\s+(all\s+)?(secrets?|credentials?|passwords?|tokens?|keys?)").unwrap(),
+                Regex::new(r"(?i)(list|show|print|display|reveal|tell\s+me)\s+(?:me\s+)?(?:all\s+)?(?:your\s+)?(?:api\s+)?(secrets?|credentials?|passwords?|tokens?|keys?)").unwrap(),
                 Regex::new(r"(?i)(what|show)\s+(are|is|me)\s+(your|the)\s+(api\s+)?(keys?|secrets?|credentials?)").unwrap(),
                 Regex::new(r"(?i)contents?\s+of\s+(vault|secrets?|credentials?)").unwrap(),
                 Regex::new(r"(?i)(dump|export)\s+(vault|secrets?|credentials?)").unwrap(),
@@ -217,7 +225,11 @@ impl PromptGuard {
         for (pattern, name) in dangerous_patterns {
             if content.contains(pattern) {
                 // Don't flag common legitimate uses
-                if pattern == "|" && (content.contains("| head") || content.contains("| tail") || content.contains("| grep")) {
+                if pattern == "|"
+                    && (content.contains("| head")
+                        || content.contains("| tail")
+                        || content.contains("| grep"))
+                {
                     continue;
                 }
                 if pattern == "&&" && content.len() < 100 {
@@ -268,9 +280,18 @@ mod tests {
     #[test]
     fn safe_messages_pass() {
         let guard = PromptGuard::new();
-        assert!(matches!(guard.scan("What is the weather today?"), GuardResult::Safe));
-        assert!(matches!(guard.scan("Please help me write some code"), GuardResult::Safe));
-        assert!(matches!(guard.scan("Can you explain quantum computing?"), GuardResult::Safe));
+        assert!(matches!(
+            guard.scan("What is the weather today?"),
+            GuardResult::Safe
+        ));
+        assert!(matches!(
+            guard.scan("Please help me write some code"),
+            GuardResult::Safe
+        ));
+        assert!(matches!(
+            guard.scan("Can you explain quantum computing?"),
+            GuardResult::Safe
+        ));
     }
 
     #[test]
