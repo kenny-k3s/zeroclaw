@@ -107,8 +107,19 @@ EXPOSE 42617
 ENTRYPOINT ["zeroclaw"]
 CMD ["gateway"]
 
-# ── Stage 3: Production Runtime (Distroless) ─────────────────
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:84fcd3c223b144b0cb6edc5ecc75641819842a9679a3a58fd6294bec47532bf7 AS release
+# ── Stage 3: Production Runtime (Debian + Node.js + mcporter) ─────────────────
+FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS release
+
+# Install runtime dependencies: ca-certs, curl, Node.js, npm
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install mcporter globally
+RUN npm install -g mcporter
 
 COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
 COPY --from=builder /zeroclaw-data /zeroclaw-data
