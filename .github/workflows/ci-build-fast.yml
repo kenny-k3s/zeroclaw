@@ -22,7 +22,7 @@ env:
 jobs:
     changes:
         name: Detect Change Scope
-            runs-on: ubuntu-24.04
+        runs-on: ubuntu-24.04
         outputs:
             rust_changed: ${{ steps.scope.outputs.rust_changed }}
             docs_only: ${{ steps.scope.outputs.docs_only }}
