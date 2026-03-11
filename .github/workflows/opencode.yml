@@ -1,0 +1,163 @@
+name: OpenCode PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  review-openai:
+    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run OpenCode Review (OpenAI)
+        uses: anomalyco/opencode/github@v1.2.15
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          model: openai/gpt-4o
+          use_github_token: false
+          prompt: |
+            You are a concise code-review assistant. Produce a short, structured
+            review for a pull request using the exact template below. Be terse
+            and action-oriented. Always include counts for severity levels and a
+            deterministic numeric risk score (0-100) computed from the counts.
+
+            ## Module Context
+            - Module: zeroclaw
+            - Namespace: n/a
+            - Services: n/a
+
+            ## Required output format (exact headings)
+            ## Verdict
+            <one-line overall assessment>
+
+            ## Issue Counts
+            - Critical: <n>
+            - Normal: <n>
+            - Low: <n>
+
+            ## Top Findings
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+
+            ## Risk Score
+            <score 0-100> (<Low|Moderate|High|Critical>) - <one-line rationale>
+
+            Constraints:
+            - Use at most 3 bullets under Top Findings (prefer Critical/Normal first).
+            - If no issues, explicitly show Critical: 0, Normal: 0, Low: 0 and
+              Risk Score 0-10 marked as Low.
+            - Risk scoring rubric (deterministic):
+              * Critical issue = +35 each
+              * Normal issue = +15 each
+              * Low issue = +5 each
+              * Cap score at 100
+            - Risk band mapping:
+              * 0-20: Low
+              * 21-50: Moderate
+              * 51-75: High
+              * 76-100: Critical
+
+            Instructions:
+            1) Analyze only the changes in this PR (diff between base and head).
+            2) Identify security, correctness, and reliability issues first.
+            3) Classify each finding (Critical/Normal/Low) and state a one-line fix.
+            4) Compute counts and the Risk Score per the rubric above and include
+               the band name.
+            5) Keep output strictly within the required headings and constraints.
+
+            Be concise. Avoid long explanations.
+
+  review-openrouter:
+    if: ${{ secrets.OPENAI_API_KEY == '' && secrets.OPENROUTER_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run OpenCode Review (OpenRouter)
+        uses: anomalyco/opencode/github@v1.2.15
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/openai/gpt-4o
+          use_github_token: false
+          prompt: |
+            You are a concise code-review assistant. Produce a short, structured
+            review for a pull request using the exact template below. Be terse
+            and action-oriented. Always include counts for severity levels and a
+            deterministic numeric risk score (0-100) computed from the counts.
+
+            ## Module Context
+            - Module: zeroclaw
+            - Namespace: n/a
+            - Services: n/a
+
+            ## Required output format (exact headings)
+            ## Verdict
+            <one-line overall assessment>
+
+            ## Issue Counts
+            - Critical: <n>
+            - Normal: <n>
+            - Low: <n>
+
+            ## Top Findings
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+            - [<Critical|Normal|Low>] <short issue summary> - <concrete fix (one line)>
+
+            ## Risk Score
+            <score 0-100> (<Low|Moderate|High|Critical>) - <one-line rationale>
+
+            Constraints:
+            - Use at most 3 bullets under Top Findings (prefer Critical/Normal first).
+            - If no issues, explicitly show Critical: 0, Normal: 0, Low: 0 and
+              Risk Score 0-10 marked as Low.
+            - Risk scoring rubric (deterministic):
+              * Critical issue = +35 each
+              * Normal issue = +15 each
+              * Low issue = +5 each
+              * Cap score at 100
+            - Risk band mapping:
+              * 0-20: Low
+              * 21-50: Moderate
+              * 51-75: High
+              * 76-100: Critical
+
+            Instructions:
+            1) Analyze only the changes in this PR (diff between base and head).
+            2) Identify security, correctness, and reliability issues first.
+            3) Classify each finding (Critical/Normal/Low) and state a one-line fix.
+            4) Compute counts and the Risk Score per the rubric above and include
+               the band name.
+            5) Keep output strictly within the required headings and constraints.
+
+            Be concise. Avoid long explanations.
+
+  missing-api-key:
+    if: ${{ secrets.OPENAI_API_KEY == '' && secrets.OPENROUTER_API_KEY == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when API key is missing
+        run: |
+          echo "Neither OPENAI_API_KEY nor OPENROUTER_API_KEY is configured."
+          echo "Add one in Settings -> Secrets and variables -> Actions."
+          exit 1

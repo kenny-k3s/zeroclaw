@@ -174,7 +174,7 @@ impl LeakDetector {
         let regexes = SECRET_PATTERNS.get_or_init(|| {
             vec![
                 (
-                    Regex::new(r#"(?i)password[=:]\s*['"]*[^\s'\"]{8,}"#).unwrap(),
+                    Regex::new(r#"(?i)password[=:]\s*['"]*[^\s'"]{8,}"#).unwrap(),
                     "Password in config",
                 ),
                 (
