@@ -8,6 +8,7 @@
 //! - Header sanitization (handled by axum/hyper)
 
 pub mod api;
+pub mod cluster_ws;
 pub mod sse;
 pub mod static_files;
 pub mod ws;
@@ -35,6 +36,7 @@ use axum::{
     Router,
 };
 use parking_lot::Mutex;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -687,6 +689,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/events", get(sse::handle_sse_events))
         // ── WebSocket agent chat ──
         .route("/ws/chat", get(ws::handle_ws_chat))
+        // ── Cluster WebSocket (node-to-node) ──
+        .route("/ws/cluster", get(cluster_ws::handle_ws_cluster))
         // ── Static assets (web dashboard) ──
         .route("/_app/{*path}", get(static_files::handle_static))
         // ── Config PUT with larger body limit ──

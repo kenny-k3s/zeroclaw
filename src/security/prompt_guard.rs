@@ -111,8 +111,9 @@ impl PromptGuard {
         total_score += score;
         max_score = max_score.max(score);
 
-        // Normalize score to 0.0-1.0 range (max possible is 6.0, one per category)
-        let normalized_score = (total_score / 6.0).min(1.0);
+        // Normalize score to 0.0-1.0 range.
+        // Each category returns a 0.0-1.0 severity score; summing is capped to 1.0.
+        let normalized_score = total_score.min(1.0);
 
         if detected_patterns.is_empty() {
             GuardResult::Safe

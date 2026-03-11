@@ -370,7 +370,7 @@ fn pick_uniform_index(len: usize) -> usize {
     loop {
         let value = rand::random::<u64>();
         if value < reject_threshold {
-            return (value % upper) as usize;
+            return usize::try_from(value % upper).unwrap_or(0);
         }
     }
 }
@@ -389,9 +389,11 @@ fn encode_emoji_for_discord(emoji: &str) -> String {
         return emoji.to_string();
     }
 
+    use std::fmt::Write as _;
+
     let mut encoded = String::new();
     for byte in emoji.as_bytes() {
-        encoded.push_str(&format!("%{byte:02X}"));
+        let _ = write!(encoded, "%{byte:02X}");
     }
     encoded
 }

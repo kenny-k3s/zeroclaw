@@ -1,0 +1,43 @@
+{
+  "components": {
+    "channels": {
+      "last_error": null,
+      "last_ok": "2026-03-01T10:24:34.709600+00:00",
+      "restart_count": 0,
+      "status": "ok",
+      "updated_at": "2026-03-01T10:24:34.709542+00:00"
+    },
+    "cluster": {
+      "last_error": null,
+      "last_ok": "2026-03-01T10:24:34.710208+00:00",
+      "restart_count": 0,
+      "status": "ok",
+      "updated_at": "2026-03-01T10:24:34.710204+00:00"
+    },
+    "daemon": {
+      "last_error": null,
+      "last_ok": "2026-03-01T10:24:34.708865+00:00",
+      "restart_count": 0,
+      "status": "ok",
+      "updated_at": "2026-03-01T10:24:34.708581+00:00"
+    },
+    "gateway": {
+      "last_error": null,
+      "last_ok": "2026-03-01T10:24:34.714576+00:00",
+      "restart_count": 0,
+      "status": "ok",
+      "updated_at": "2026-03-01T10:24:34.714571+00:00"
+    },
+    "scheduler": {
+      "last_error": null,
+      "last_ok": "2026-03-01T19:11:57.888342+00:00",
+      "restart_count": 0,
+      "status": "ok",
+      "updated_at": "2026-03-01T19:11:57.888304+00:00"
+    }
+  },
+  "pid": 8872,
+  "updated_at": "2026-03-01T19:11:57.888444+00:00",
+  "uptime_seconds": 28365,
+  "written_at": "2026-03-01T19:11:57.888578+00:00"
+}

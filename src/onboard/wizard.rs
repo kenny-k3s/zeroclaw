@@ -169,6 +169,8 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         hardware: hardware_config,
         query_classification: crate::config::QueryClassificationConfig::default(),
         transcription: crate::config::TranscriptionConfig::default(),
+        cluster: crate::config::ClusterConfig::default(),
+        openclaw_node: None,
     };
 
     println!(
@@ -520,6 +522,8 @@ async fn run_quick_setup_with_home(
         hardware: crate::config::HardwareConfig::default(),
         query_classification: crate::config::QueryClassificationConfig::default(),
         transcription: crate::config::TranscriptionConfig::default(),
+        cluster: crate::config::ClusterConfig::default(),
+        openclaw_node: None,
     };
 
     config.save().await?;
