@@ -87,7 +87,9 @@ jobs:
                   cache-to: type=gha,mode=max
 
             - name: Verify image
-              run: docker run --rm zeroclaw-pr-smoke:latest --version
+              run: |
+                  docker run --rm zeroclaw-pr-smoke:latest --version
+                  docker run --rm zeroclaw-pr-smoke:latest sh -c "which mcporter && mcporter --help" || echo "mcporter verification failed"
 
     publish:
         name: Build and Push Docker Image

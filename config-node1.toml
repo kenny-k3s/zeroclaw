@@ -1,0 +1,40 @@
+api_key = "sk-1Jcm-SnxwQJfSPFWPckOJA"
+default_provider = "custom:http://litellm.ai.svc.cluster.local:4000"
+default_model = "copilot/gpt-5-mini"
+default_temperature = 0.7
+model_routes = []
+embedding_routes = []
+
+[cluster]
+enabled = true
+node_name = "node-1"
+bind_host = "0.0.0.0"
+bind_port = 9000
+node_token = "secret"
+peers = ["127.0.0.1:9001"]
+heartbeat_interval_secs = 5
+
+[[agents]]
+name = "researcher"
+provider = "openai"
+model = "gpt-4o-mini"
+system_prompt = "You are a research assistant. Be concise."
+
+[observability]
+backend = "none"
+runtime_trace_mode = "none"
+
+[autonomy]
+level = "supervised"
+workspace_only = true
+allowed_commands = ["git", "ls", "cat", "echo", "pwd", "date"]
+
+[memory]
+backend = "markdown"
+
+[gateway]
+host = "0.0.0.0"
+port = 8080
+
+[tunnel]
+provider = "none"
