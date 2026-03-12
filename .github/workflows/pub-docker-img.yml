@@ -63,7 +63,7 @@ jobs:
             - name: Verify image
               run: |
                   docker run --rm zeroclaw-pr-smoke:latest --version
-                  docker run --rm zeroclaw-pr-smoke:latest sh -c "which mcporter && mcporter --help" || echo "mcporter verification failed"
+                  docker run --rm zeroclaw-pr-smoke:latest sh -c "node --version && npm --version && which brew && brew --version && which mcporter && mcporter --help"
 
     publish:
         name: Build and Push Docker Image
