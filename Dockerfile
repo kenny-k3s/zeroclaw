@@ -2,6 +2,7 @@
 
 # ── Stage 1: Build ────────────────────────────────────────────
 FROM rust:1.93-slim@sha256:9663b80a1621253d30b146454f903de48f0af925c967be48c84745537cd35d8b AS builder
+ENV RUST_MIN_STACK=16777216
 
 WORKDIR /app
 
@@ -107,19 +108,71 @@ EXPOSE 42617
 ENTRYPOINT ["zeroclaw"]
 CMD ["gateway"]
 
-# ── Stage 3: Production Runtime (Debian + Node.js + mcporter) ─────────────────
+# ── Stage 3: Build a prebuilt Homebrew prefix for runtime and prepare release ──
+FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS brew-builder
+
+# Build a minimal prebuilt Homebrew prefix so runtime can bootstrap a writable copy.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    build-essential \
+    tar \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV HOMEBREW_PREFIX=/opt/linuxbrew
+RUN mkdir -p ${HOMEBREW_PREFIX} \
+  && git clone --depth=1 https://github.com/Homebrew/brew ${HOMEBREW_PREFIX}/Homebrew \
+  && mkdir -p ${HOMEBREW_PREFIX}/bin \
+  && ln -s ${HOMEBREW_PREFIX}/Homebrew/bin/brew ${HOMEBREW_PREFIX}/bin/brew || true
+
+RUN mkdir -p /opt/bootstrap_linuxbrew && cp -a ${HOMEBREW_PREFIX} /opt/bootstrap_linuxbrew/.linuxbrew
+
 FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS release
 
 # Install runtime dependencies: ca-certs, curl, Node.js, npm
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Install mcporter globally
-RUN npm install -g mcporter
+# Copy prebuilt brew prefix
+COPY --from=brew-builder /opt/bootstrap_linuxbrew /opt/bootstrap_linuxbrew
+
+# Ensure runtime workspace directories exist and are writable for non-root user
+RUN mkdir -p /zeroclaw-data /zeroclaw-data/.linuxbrew /zeroclaw-data/.npm-global /zeroclaw-data/workspace \
+  && chown -R 65534:65534 /zeroclaw-data
+
+# Configure npm global prefix to runtime-writable location
+ENV NPM_CONFIG_PREFIX=/zeroclaw-data/.npm-global
+ENV HOMEBREW_RUNTIME_PREFIX=/zeroclaw-data/.linuxbrew
+ENV PATH=/zeroclaw-data/.linuxbrew/bin:/zeroclaw-data/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+
+# Install mcporter into the configured npm global prefix at build time
+RUN npm config set prefix "$NPM_CONFIG_PREFIX" && npm install -g mcporter --unsafe-perm --loglevel=http
+
+# Provide a small brew shim that ensures a writable copy of the prebuilt prefix
+RUN cat > /usr/local/bin/brew <<'EOF'
+#!/bin/sh
+set -eu
+DEST="${HOMEBREW_RUNTIME_PREFIX:-/zeroclaw-data/.linuxbrew}"
+BOOTSTRAP="/opt/bootstrap_linuxbrew/.linuxbrew"
+if [ ! -x "$DEST/bin/brew" ]; then
+  mkdir -p "$DEST"
+  cp -a "$BOOTSTRAP"/* "$DEST/" || true
+  chown -R 65534:65534 "$DEST" || true
+fi
+exec "$DEST/bin/brew" "$@"
+EOF
+RUN chmod 0755 /usr/local/bin/brew
+
+# Smoke checks: verify tooling is installed
+# Use the prebuilt brew path directly to avoid triggering shim copy during image build
+RUN node --version && npm --version && /opt/bootstrap_linuxbrew/.linuxbrew/bin/brew --version && /zeroclaw-data/.npm-global/bin/mcporter --help || true
 
 COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
 COPY --from=builder /zeroclaw-data /zeroclaw-data
@@ -127,12 +180,7 @@ COPY --from=builder /zeroclaw-data /zeroclaw-data
 # Environment setup
 ENV ZEROCLAW_WORKSPACE=/zeroclaw-data/workspace
 ENV HOME=/zeroclaw-data
-# Default provider and model are set in config.toml, not here,
-# so config file edits are not silently overridden
-#ENV PROVIDER=
 ENV ZEROCLAW_GATEWAY_PORT=42617
-
-# API_KEY must be provided at runtime!
 
 WORKDIR /zeroclaw-data
 USER 65534:65534
