@@ -11,13 +11,24 @@ permissions:
   pull-requests: write
   issues: write
 
-env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
+# Compute secret presence in a prepare job so job-level ifs can use needs.prepare.outputs
 jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      openai_present: ${{ steps.check.outputs.openai_present }}
+      openrouter_present: ${{ steps.check.outputs.openrouter_present }}
+    steps:
+      - name: Check for configured API keys
+        id: check
+        run: |
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then echo "openai_present=true" >> "$GITHUB_OUTPUT"; else echo "openai_present=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "${{ secrets.OPENROUTER_API_KEY }}" ]; then echo "openrouter_present=true" >> "$GITHUB_OUTPUT"; else echo "openrouter_present=false" >> "$GITHUB_OUTPUT"; fi
+
   review-openai:
-    if: ${{ env.OPENAI_API_KEY != '' }}
+    needs: prepare
+    if: ${{ needs.prepare.outputs.openai_present == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -87,7 +98,8 @@ jobs:
             Be concise. Avoid long explanations.
 
   review-openrouter:
-    if: ${{ env.OPENAI_API_KEY == '' && env.OPENROUTER_API_KEY != '' }}
+    needs: prepare
+    if: ${{ needs.prepare.outputs.openai_present == 'false' && needs.prepare.outputs.openrouter_present == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -157,7 +169,8 @@ jobs:
             Be concise. Avoid long explanations.
 
   missing-api-key:
-    if: ${{ env.OPENAI_API_KEY == '' && env.OPENROUTER_API_KEY == '' }}
+    needs: prepare
+    if: ${{ needs.prepare.outputs.openai_present == 'false' && needs.prepare.outputs.openrouter_present == 'false' }}
     runs-on: ubuntu-latest
     steps:
       - name: Fail when API key is missing
