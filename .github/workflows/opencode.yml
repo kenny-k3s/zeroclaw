@@ -11,9 +11,13 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
 jobs:
   review-openai:
-    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    if: ${{ env.OPENAI_API_KEY != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -83,7 +87,7 @@ jobs:
             Be concise. Avoid long explanations.
 
   review-openrouter:
-    if: ${{ secrets.OPENAI_API_KEY == '' && secrets.OPENROUTER_API_KEY != '' }}
+    if: ${{ env.OPENAI_API_KEY == '' && env.OPENROUTER_API_KEY != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -153,7 +157,7 @@ jobs:
             Be concise. Avoid long explanations.
 
   missing-api-key:
-    if: ${{ secrets.OPENAI_API_KEY == '' && secrets.OPENROUTER_API_KEY == '' }}
+    if: ${{ env.OPENAI_API_KEY == '' && env.OPENROUTER_API_KEY == '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Fail when API key is missing
